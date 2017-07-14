@@ -3,7 +3,7 @@
  * Uses both matchpathcon & setfilecon ( xattr ) to set contexts
  * It's usefull to do a restorecon BEFORE reboot to avoid .autorelabel
  * (C) Ivan Agarkov, 2017
-**/
+ **/
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -58,6 +58,9 @@ int recursecon(char *path, int verbose) {
   int mode;
   if((mode = restorecon(path, verbose)) > 0) {
     if(S_ISDIR(mode)) {
+      if(S_ISLNK(mode)) { // skip if it is a link
+        return 0;
+      }
       struct dirent *dir;
       DIR *dp;
       if(!(dp = opendir(path))) {
@@ -68,7 +71,8 @@ int recursecon(char *path, int verbose) {
           continue;
         }
         char *path_next = (char *)malloc(strlen(path)+strlen(dir->d_name)+2);
-        sprintf(path_next, "%s/%s", path, dir->d_name);
+        int fl = (path[strlen(path)] == '/');
+        sprintf(path_next, (fl)?"%s%s":"%s/%s", path, dir->d_name);
         recursecon(path_next, verbose);
         free(path_next);
       }
