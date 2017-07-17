@@ -18,6 +18,47 @@
 #define MAX_CONTEXT_SIZE 255
 #define DEFAULT_LABEL "system_u:object_r:unlabeled_t"
 
+struct file_queue {
+  char *path;
+  struct file_queue *next;
+};
+typedef struct file_queue FQ;
+
+
+FQ *create_queue(char *path) {
+  FQ *ret = malloc(sizeof(FQ));
+  ret->path = malloc(strlen(path)+1);
+  ret->next = 0;
+  strncpy(ret->path, path, strlen(path));
+  *(ret->path+strlen(path)) = 0;
+  return ret;
+}
+
+FQ *append_queue(FQ *q, char *path) {
+  FQ *ret = create_queue(path);
+  q->next = ret;
+  return ret;
+}
+
+void free_queue(FQ *root) {
+  if(!root) {
+    return;
+  }
+  FQ *q = root;
+  do {
+    FQ *n = q->next;
+    if(q->path) {
+      free(q->path);
+    }
+    free(q);
+    if(n) {
+      q = n;
+    } else {
+      q = 0;
+    }
+  } while(q);
+}
+
 int get_mode(char *path) {
   struct stat fstat;
   if(stat(path, &fstat) == 0) {
@@ -54,30 +95,39 @@ int restorecon(char *path, int verbose) {
 }
 
 int recursecon(char *path, int verbose) {
-  // 1. restorecon
   int mode;
   if((mode = restorecon(path, verbose)) > 0) {
-    if(S_ISDIR(mode)) {
-      if(S_ISLNK(mode)) { // skip if it is a link
-        return 0;
-      }
-      struct dirent *dir;
-      DIR *dp;
-      if(!(dp = opendir(path))) {
-        return -1;
-      }
-      while((dir = readdir(dp))) {
-        if(strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) {
-          continue;
-        }
-        char *path_next = (char *)malloc(strlen(path)+strlen(dir->d_name)+2);
-        int fl = (path[strlen(path)] == '/');
-        sprintf(path_next, (fl)?"%s%s":"%s/%s", path, dir->d_name);
-        recursecon(path_next, verbose);
-        free(path_next);
-      }
-      closedir(dp);
+    if(S_ISLNK(mode) || !S_ISDIR(mode)) { // skip if it is a link
+      return 0;
     }
+    struct dirent *dir;
+    DIR *dp;
+    if(!(dp = opendir(path))) {
+      return -1;
+    }
+    FQ *root = 0, *q = 0;
+    while((dir = readdir(dp))) {
+      if(strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) {
+        continue;
+      }
+      char *path_next = (char *)malloc(strlen(path)+strlen(dir->d_name)+2);
+      int fl = (path[strlen(path)] == '/');
+      sprintf(path_next, (fl)?"%s%s":"%s/%s", path, dir->d_name);
+      if(!root) {
+        root = create_queue(path_next);
+        q = root;
+      } else {
+        q = append_queue(q, path_next);
+      }
+      free(path_next);
+    }
+    closedir(dp);
+    q = root;
+    while(q) {
+      recursecon(q->path, verbose);
+      q = q->next;
+    }
+    free_queue(root);
     return 0;
   }
   return -1; // nothing to do if we failed here
