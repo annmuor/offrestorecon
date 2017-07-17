@@ -171,7 +171,7 @@ void set_idle() {
     fprintf(stderr, "ioprio_set(): %s\n", strerror(errno));
     exit(-1);
   }
-// nice
+  // nice
   if(setpriority(PRIO_PROCESS, 0, 20) < 0) {
     fprintf(stderr, "setpriority(): %s\n", strerror(errno));
   }
