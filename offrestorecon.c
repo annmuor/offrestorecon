@@ -9,9 +9,13 @@
 #include <stdio.h>
 #include <selinux/selinux.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <dirent.h>
 #include <malloc.h>
 #include <errno.h>
@@ -142,24 +146,62 @@ int print_help() {
   printf("This program restores SELinux file context ( xattr wrapped fields ) without enabling SELinux on the host\n");
   printf("  -R - recursive restore SELinux labels\n");
   printf("  -v - be verbose\n");
+  printf("  -i - set ionice to idle/nice to 20 to prevent cpu load\n");
   printf(" -h/-? - see this help\n");
   return 0;
+}
+
+enum {
+  IOPRIO_CLASS_NONE,
+  IOPRIO_CLASS_RT,
+  IOPRIO_CLASS_BE,
+  IOPRIO_CLASS_IDLE,
+};
+
+enum {
+  IOPRIO_WHO_PROCESS = 1,
+  IOPRIO_WHO_PGRP,
+  IOPRIO_WHO_USER,
+};
+
+#define IOPRIO_CLASS_SHIFT  13
+
+void set_idle() {
+  if(syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0, IOPRIO_CLASS_IDLE|IOPRIO_CLASS_BE<<IOPRIO_CLASS_SHIFT) < 0) {
+    fprintf(stderr, "ioprio_set(): %s\n", strerror(errno));
+    exit(-1);
+  }
+// nice
+  if(setpriority(PRIO_PROCESS, 0, 20) < 0) {
+    fprintf(stderr, "setpriority(): %s\n", strerror(errno));
+  }
+
 }
 
 int main(int argc, char *argv[]) {
   int o;
   int verbose = 0;
   int recurse = 0;
+  int idle = 0;
 
-  while((o = getopt(argc, argv, "Rvh")) > 0) {
+  while((o = getopt(argc, argv, "Rvhi")) > 0) {
     if(o == 'h') {
       return print_help();
     } else if(o == 'R') {
       recurse = 1;
     } else if(o == 'v') {
       verbose = 1;
+    } else if(o == 'i') {
+      idle = 1;
     } else {
       return print_help();
+    }
+  }
+  if ( idle ) {
+    set_idle();
+    if (verbose) {
+      printf("Setting iopriority to IDLE priority\n");
+      printf("Setting priority to 20 priority\n");
     }
   }
   if(optind >= argc) {
