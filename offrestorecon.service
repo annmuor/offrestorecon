@@ -1,0 +1,11 @@
+[Unit]
+Description=Offline restorecon to start once before reboot
+
+[Service]
+Type=simple
+ExecStartPre=/usr/share/offrestorecon/exec-pre.sh
+ExecStart=/usr/bin/offrestorecon -Ri /
+RemainAfterExit=yes
+ExecStopPost=/usr/share/offrestorecon/exec-post.sh
+Restart=no
+
