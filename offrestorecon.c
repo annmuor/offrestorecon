@@ -24,7 +24,8 @@
 
 int get_mode(char *path) {
   struct stat fstat;
-  if(stat(path, &fstat) == 0) {
+  bzero(&fstat, sizeof(stat));
+  if(lstat(path, &fstat) == 0) {
     return fstat.st_mode;
   }
   return -1;
@@ -57,47 +58,134 @@ int restorecon(char *path, int verbose) {
   return mode;
 }
 
-int recursecon(char *path, int verbose) {
-  int mode;
-  if((mode = restorecon(path, verbose)) > 0) {
-    if(S_ISLNK(mode) || !S_ISDIR(mode)) { // skip if it is a link
-      return 0;
+// DEPRECATED
+//int recursecon(char *path, int verbose) {
+//  int mode = restorecon(path, verbose);
+//  if(mode < 0) {
+//      return -1;
+//  }
+//  if(S_ISLNK(mode)) {
+//      return 0;
+//  }
+//  if(S_ISDIR(mode)) {
+//      struct dirent *dir;
+//      DIR *dp;
+//      if(!(dp = opendir(path))) {
+//          return -1;
+//      }
+//      FQ *root = 0, *q = 0;
+//      while((dir = readdir(dp))) {
+//          if(strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) {
+//              continue;
+//          }
+//          char *path_next = (char *)malloc(strlen(path)+strlen(dir->d_name)+2);
+//          int fl = (path[strlen(path)] == '/');
+//          sprintf(path_next, (fl)?"%s%s":"%s/%s", path, dir->d_name);
+//          if(!root) {
+//              root = create_queue(path_next);
+//              q = root;
+//          } else {
+//              q = append_queue(q, path_next);
+//          }
+//          free(path_next);
+//      }
+//      closedir(dp);
+//      q = root;
+//      while(q) {
+//          int mode = get_mode(q->path);
+//          if(!S_ISLNK(mode)) {
+//              if(S_ISDIR(mode))  {
+//                  recursecon(q->path, verbose);
+//              } else {
+//                  restorecon(q->path, verbose);
+//              }
+//          } else {
+//              printf("%s is a link, skipping!\n", q->path);
+//          }
+//          q = q->next;
+//      }
+//      free_queue(root);
+//  }
+//  return 0;
+//}
+
+char *lsdir(char *path) {
+  static char *ret = 0;
+  static char *oldpath = 0;
+  static DIR *dp = 0;
+  if(ret) {
+    free(ret);
+    ret = 0;
+  }
+  if(!oldpath || strcmp(path, oldpath) != 0) {
+    if(dp) {
+      closedir(dp);
+      dp = 0;
     }
-    struct dirent *dir;
-    DIR *dp;
-    if(!(dp = opendir(path))) {
-      return -1;
+    if(oldpath) {
+      free(oldpath);
+      oldpath = 0;
     }
-    FQ *root = 0, *q = 0;
-    while((dir = readdir(dp))) {
-      if(strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) {
-        continue;
-      }
-      char *path_next = (char *)malloc(strlen(path)+strlen(dir->d_name)+2);
-      int fl = (path[strlen(path)] == '/');
-      sprintf(path_next, (fl)?"%s%s":"%s/%s", path, dir->d_name);
-      if(!root) {
-        root = create_queue(path_next);
-        q = root;
-      } else {
-        q = append_queue(q, path_next);
-      }
-      free(path_next);
+    oldpath = strdup(path);
+    dp = opendir(oldpath);
+  }
+  struct dirent *d;
+  while((d = readdir(dp))) {
+    if(strcmp(d->d_name, ".") == 0 || strcmp(d->d_name, "..") == 0) {
+      continue;
     }
+    int sz = strlen(oldpath)+2+strlen(d->d_name);
+    ret = malloc(sz);
+    int fl = oldpath[strlen(oldpath)-1] == '/';
+    snprintf(ret, sz, (fl)?"%s%s":"%s/%s", oldpath, d->d_name);
+    return ret;
+  }
+  // latest - free all
+  if(dp) {
     closedir(dp);
+    dp = 0;
+  }
+  if(oldpath) {
+    free(oldpath);
+    oldpath = 0;
+  }
+  return 0;
+}
+
+
+int dircon(char *path, int verbose) {
+  FQ *root = create_queue(path);
+  FQ *next = 0, *q = 0, *q2 = 0;
+  int count = 0;
+  while(root) {
     q = root;
     while(q) {
-      recursecon(q->path, verbose);
+      int mode = restorecon(q->path, verbose);
+      count++;
+      if(mode > 0) {
+        if(!S_ISLNK(mode) && S_ISDIR(mode)) {
+          char *first = lsdir(q->path);
+          if(first) {
+            if(!next) {
+              q2 = next = create_queue(first);
+            }
+            while((first = lsdir(q->path))) {
+              q2 = append_queue(q2, first);
+            }
+          }
+        }
+      }
       q = q->next;
     }
     free_queue(root);
-    return 0;
+    root = next; // hope next is not 0;
+    next = 0;
   }
-  return -1; // nothing to do if we failed here
+  return count;
 }
 
 inline int restore(char *path, int recurse, int verbose) {
-  return (recurse)?recursecon(path, verbose):restorecon(path, verbose);
+  return (recurse)?dircon(path, verbose):restorecon(path, verbose);
 }
 
 int print_help() {
@@ -167,7 +255,8 @@ int main(int argc, char *argv[]) {
     return print_help();
   }
   do {
-    restore(argv[optind++], recurse, verbose);
+    int d = restore(argv[optind++], recurse, verbose);
+    printf("Total: %d\n", d);
   } while(optind < argc);
   return 0;
 }
