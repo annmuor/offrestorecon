@@ -17,51 +17,10 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <dirent.h>
-#include <malloc.h>
 #include <errno.h>
+#include "queue.h"
 #define MAX_CONTEXT_SIZE 255
 #define DEFAULT_LABEL "system_u:object_r:unlabeled_t"
-
-struct file_queue {
-  char *path;
-  struct file_queue *next;
-};
-typedef struct file_queue FQ;
-
-
-FQ *create_queue(char *path) {
-  FQ *ret = malloc(sizeof(FQ));
-  ret->path = malloc(strlen(path)+1);
-  ret->next = 0;
-  strncpy(ret->path, path, strlen(path));
-  *(ret->path+strlen(path)) = 0;
-  return ret;
-}
-
-FQ *append_queue(FQ *q, char *path) {
-  FQ *ret = create_queue(path);
-  q->next = ret;
-  return ret;
-}
-
-void free_queue(FQ *root) {
-  if(!root) {
-    return;
-  }
-  FQ *q = root;
-  do {
-    FQ *n = q->next;
-    if(q->path) {
-      free(q->path);
-    }
-    free(q);
-    if(n) {
-      q = n;
-    } else {
-      q = 0;
-    }
-  } while(q);
-}
 
 int get_mode(char *path) {
   struct stat fstat;
@@ -172,7 +131,7 @@ void set_idle() {
     exit(-1);
   }
   // nice
-  if(setpriority(PRIO_PROCESS, 0, 20) < 0) {
+  if(setpriority(PRIO_PROCESS, 0, 19) < 0) {
     fprintf(stderr, "setpriority(): %s\n", strerror(errno));
   }
 

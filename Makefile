@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-c -Wall
 LDFLAGS=-lselinux
-SOURCES=offrestorecon.c
+SOURCES=offrestorecon.c queue.c
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=offrestorecon
 
